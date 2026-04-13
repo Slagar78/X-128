@@ -1095,22 +1095,14 @@ void color_update_m4(int index, unsigned int data)
 /*--------------------------------------------------------------------------*/
 /* Color palette update — 15-битный CRAM (256 цветов) для SF2              */
 /*--------------------------------------------------------------------------*/
+
 void color_update_m5(int index, unsigned int data)
 {
-  /* data уже приходит 15-битным (R5G5B5) из vdp_ctrl.c */
-  /* Для кастомного 6 bpp режима мы используем 256 прямых цветов */
-
-  /* Основной цвет (индекс 0-255) */
-  pixel[0x00 | index] = MAKE_PIXEL((data >> 10) & 0x1F,   /* R */
-                                   (data >> 5)  & 0x1F,   /* G */
-                                   data & 0x1F);          /* B */
-
-  /* Shadow / Highlight варианты нам не нужны в SF2 (кастомный режим) */
-  /* Но оставляем их равными основному цвету, чтобы не ломать другие игры */
+  /* data уже 15-битный (R5G5B5) */
+  pixel[0x00 | index] = MAKE_PIXEL((data >> 10) & 0x1F, (data >> 5) & 0x1F, data & 0x1F);
   pixel[0x40 | index] = pixel[0x00 | index];
   pixel[0x80 | index] = pixel[0x00 | index];
 
-  /* Обновляем backdrop color (регистр 7) */
   if (index == (reg[7] & 0xFF))
   {
     pixel[0x10] = pixel[0x00 | index];
