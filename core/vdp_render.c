@@ -1092,34 +1092,33 @@ void color_update_m4(int index, unsigned int data)
   }
 }
 
+/*--------------------------------------------------------------------------*/
+/* Color palette update — 15-битный CRAM (256 цветов) для SF2              */
+/*--------------------------------------------------------------------------*/
 void color_update_m5(int index, unsigned int data)
 {
-  /* Palette Mode */
-  if (!(reg[0] & 0x04))
-  {
-    /* Color value is limited to 00X00X00X */
-    data &= 0x49;
-  }
+  /* data уже приходит 15-битным (R5G5B5) из vdp_ctrl.c */
+  /* Для кастомного 6 bpp режима мы используем 256 прямых цветов */
 
-  if(reg[12] & 0x08)
-  {
-    /* Mode 5 (Shadow/Normal/Highlight) */
-    pixel[0x00 | index] = pixel_lut[0][data];
-    pixel[0x40 | index] = pixel_lut[1][data];
-    pixel[0x80 | index] = pixel_lut[2][data];
-  }
-  else
-  {
-    /* Mode 5 (Normal) */
-    data = pixel_lut[1][data];
+  /* Основной цвет (индекс 0-255) */
+  pixel[0x00 | index] = MAKE_PIXEL((data >> 10) & 0x1F,   /* R */
+                                   (data >> 5)  & 0x1F,   /* G */
+                                   data & 0x1F);          /* B */
 
-    /* Input pixel: xxiiiiii */
-    pixel[0x00 | index] = data;
-    pixel[0x40 | index] = data;
-    pixel[0x80 | index] = data;
+  /* Shadow / Highlight варианты нам не нужны в SF2 (кастомный режим) */
+  /* Но оставляем их равными основному цвету, чтобы не ломать другие игры */
+  pixel[0x40 | index] = pixel[0x00 | index];
+  pixel[0x80 | index] = pixel[0x00 | index];
+
+  /* Обновляем backdrop color (регистр 7) */
+  if (index == (reg[7] & 0xFF))
+  {
+    pixel[0x10] = pixel[0x00 | index];
+    pixel[0x30] = pixel[0x00 | index];
+    pixel[0x90] = pixel[0x00 | index];
+    pixel[0xB0] = pixel[0x00 | index];
   }
 }
-
 
 /*--------------------------------------------------------------------------*/
 /* Background layers rendering functions                                    */
@@ -4828,38 +4827,28 @@ void render_reset(void)
 
 void render_line(int line)
 {
-  /* Check display status */
-  if (reg[1] & 0x40)
+  if (reg[1] & 0x40)  /* MD display enabled */
   {
-    /* Update pattern cache */
     if (bg_list_index)
     {
       update_bg_pattern_cache(bg_list_index);
       bg_list_index = 0;
     }
 
-    /* Render BG layer(s) */
-    render_bg(line);
+    /* === КАСТОМНЫЙ 6 BPP РЕНДЕР ДЛЯ SHINING FORCE II === */
+    render_bg = render_bg_m5_sf2;
+    render_obj = render_obj_m5_sf2;
 
-    /* Render sprite layer */
+    render_bg(line);
     render_obj(line & 1);
 
-    /* Left-most column blanking */
     if (reg[0] & 0x20)
-    {
       if (system_hw >= SYSTEM_MARKIII)
-      {
         memset(&linebuf[0][0x20], 0x40, 8);
-      }
-    }
 
-    /* Parse sprites for next line */
     if (line < (bitmap.viewport.h - 1))
-    {
       parse_satb(line);
-    }
 
-    /* Horizontal borders */
     if (bitmap.viewport.x > 0)
     {
       memset(&linebuf[0][0x20 - bitmap.viewport.x], 0x40, bitmap.viewport.x);
@@ -4868,22 +4857,15 @@ void render_line(int line)
   }
   else
   {
-    /* Master System & Game Gear VDP specific */
     if (system_hw < SYSTEM_MD)
     {
-      /* Update SOVR flag */
       status |= spr_ovr;
       spr_ovr = 0;
-
-      /* Sprites are still parsed when display is disabled */
       parse_satb(line);
     }
-
-    /* Blanked line */
     memset(&linebuf[0][0x20 - bitmap.viewport.x], 0x40, bitmap.viewport.w + 2*bitmap.viewport.x);
   }
 
-  /* Pixel color remapping */
   remap_line(line);
 }
 
@@ -4951,5 +4933,101 @@ void remap_line(int line)
       while (--width);
     }
  #endif
+  }
+}  
+/*--------------------------------------------------------------------------*/
+/* 6 bpp pattern cache update (48 bytes per tile)                          */
+/*--------------------------------------------------------------------------*/
+void update_bg_pattern_cache_m5_sf2(int index)
+{
+  int i, name;
+  uint8 *dst;
+  uint32 *src;
+
+  for (i = 0; i < index; i++)
+  {
+    name = bg_name_list[i];
+    if (bg_name_dirty[name] == 0) continue;
+
+    dst = &bg_pattern_cache[name << VRAM_TILE_SHIFT];
+    src = (uint32 *)&vram[name << VRAM_TILE_SHIFT];
+
+    memcpy(dst, src, TILE_BYTES);
+
+    bg_name_dirty[name] = 0;
+  }
+  bg_list_index = 0;
+}
+
+/*--------------------------------------------------------------------------*/
+/* 6 bpp background rendering                                               */
+/*--------------------------------------------------------------------------*/
+void render_bg_m5_sf2(int line)
+{
+  int i, x;
+  uint16 *nt;
+  uint8 *dst = linebuf[0] + 0x20;
+  uint8 *tile_data;
+  uint16 attr;
+  uint8 atex, pixel;
+
+  nt = (uint16 *)&vram[ntab + ((vscroll + line) & playfield_row_mask) * 4];
+
+  for (i = 0; i < (bitmap.viewport.w >> 3); i++)
+  {
+    attr = nt[(hscroll_mask + i) & playfield_col_mask];
+    tile_data = &vram[((attr & 0x07FF) << VRAM_TILE_SHIFT) + ((line & 7) * 6)];
+
+    atex = ((attr >> 13) & 0xC0) | ((attr >> 15) & 0x01);
+
+    for (x = 0; x < 8; x++)
+    {
+      int byte_idx = (x * 6) >> 3;
+      int bit_off  = (x * 6) & 7;
+
+      pixel = (tile_data[byte_idx] >> bit_off) & 0x3F;
+      if (bit_off > 2)
+        pixel |= (tile_data[byte_idx + 1] << (8 - bit_off)) & 0x3F;
+
+      dst[x] = atex | pixel;
+    }
+    dst += 8;
+  }
+}
+
+/*--------------------------------------------------------------------------*/
+/* 6 bpp sprite rendering                                                   */
+/*--------------------------------------------------------------------------*/
+void render_obj_m5_sf2(int line)
+{
+  int i, x;
+  uint8 *dst = linebuf[0] + 0x20;
+  uint16 *st = (uint16 *)&sat[0];
+  uint8 *tile_data;
+  uint16 attr;
+  uint8 atex, pixel;
+
+  for (i = 0; i < max_sprite_pixels; i += 8)
+  {
+    attr = st[i >> 3];
+    if ((attr & 0xFF00) == 0) continue;
+
+    tile_data = &vram[((attr & 0x07FF) << VRAM_TILE_SHIFT) + 
+                      (((line - (attr >> 8)) & 7) * 6)];
+
+    atex = ((attr >> 13) & 0xC0) | ((attr >> 15) & 0x01);
+
+    for (x = 0; x < 8; x++)
+    {
+      int byte_idx = (x * 6) >> 3;
+      int bit_off  = (x * 6) & 7;
+
+      pixel = (tile_data[byte_idx] >> bit_off) & 0x3F;
+      if (bit_off > 2)
+        pixel |= (tile_data[byte_idx + 1] << (8 - bit_off)) & 0x3F;
+
+      if (pixel)
+        dst[x] = atex | pixel;
+    }
   }
 }

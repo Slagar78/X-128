@@ -355,7 +355,7 @@ void vdp_reset(void)
   }
 
   /* default rendering mode */
-  update_bg_pattern_cache = update_bg_pattern_cache_m4;
+  update_bg_pattern_cache = update_bg_pattern_cache_m5_sf2;
   if (system_hw < SYSTEM_MD)
   {
     /* Mode 0 */
@@ -578,7 +578,7 @@ int vdp_context_load(uint8 *state)
     }
 
     /* reinitialize rendering functions */
-    update_bg_pattern_cache = update_bg_pattern_cache_m5;
+    update_bg_pattern_cache = update_bg_pattern_cache_m5_sf2;   /* было m5 */
     parse_satb = parse_satb_m5;
     render_bg = (reg[11] & 0x04) ? (config.enhanced_vscroll ? render_bg_m5_vs_enhanced : render_bg_m5_vs) : render_bg_m5;
     render_obj = (reg[12] & 0x08) ? render_obj_m5_ste : render_obj_m5;
@@ -1785,7 +1785,7 @@ static void vdp_reg_w(unsigned int r, unsigned int d, unsigned int cycles)
             }
 
             /* Mode 5 rendering */
-            update_bg_pattern_cache = update_bg_pattern_cache_m5;
+            update_bg_pattern_cache = update_bg_pattern_cache_m5_sf2;
             if (im2_flag)
             {
               parse_satb = parse_satb_m5_im2;
