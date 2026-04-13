@@ -4949,41 +4949,44 @@ void update_bg_pattern_cache_m5_sf2(int index)
     name = bg_name_list[i];
     if (bg_name_dirty[name] == 0) continue;
 
-    dst = &bg_pattern_cache[name << VRAM_TILE_SHIFT];
-    src = (uint32 *)&vram[name << VRAM_TILE_SHIFT];
+    dst = &bg_pattern_cache[name << 6];   /* << 6 = 48 байт */
+    src = (uint32 *)&vram[name << 6];
 
-    memcpy(dst, src, TILE_BYTES);
-
+    memcpy(dst, src, 48);
     bg_name_dirty[name] = 0;
   }
   bg_list_index = 0;
 }
 
 /*--------------------------------------------------------------------------*/
-/* 6 bpp background rendering                                               */
+/* ПОЛНОЦЕННЫЙ 6 bpp background rendering (с hflip / vflip)                */
 /*--------------------------------------------------------------------------*/
 void render_bg_m5_sf2(int line)
 {
   int i, x;
-  uint16 *nt;
+  uint16 *nt = (uint16 *)&vram[ntab + ((vscroll + line) & playfield_row_mask) * 4];
   uint8 *dst = linebuf[0] + 0x20;
   uint8 *tile_data;
   uint16 attr;
-  uint8 atex, pixel;
-
-  nt = (uint16 *)&vram[ntab + ((vscroll + line) & playfield_row_mask) * 4];
+  uint8 atex, pixel, hflip, vflip, row;
 
   for (i = 0; i < (bitmap.viewport.w >> 3); i++)
   {
     attr = nt[(hscroll_mask + i) & playfield_col_mask];
-    tile_data = &vram[((attr & 0x07FF) << VRAM_TILE_SHIFT) + ((line & 7) * 6)];
 
-    atex = ((attr >> 13) & 0xC0) | ((attr >> 15) & 0x01);
+    hflip = (attr >> 11) & 1;
+    vflip = (attr >> 12) & 1;
+    row = vflip ? (7 - (line & 7)) : (line & 7);
+
+    tile_data = &vram[((attr & 0x07FF) << 6) + (row * 6)];  /* 48-байтный тайл */
+
+    atex = ((attr >> 13) & 0xC0) | ((attr >> 15) & 0x01);   /* palette + priority */
 
     for (x = 0; x < 8; x++)
     {
-      int byte_idx = (x * 6) >> 3;
-      int bit_off  = (x * 6) & 7;
+      int px = hflip ? (7 - x) : x;
+      int byte_idx = (px * 6) >> 3;
+      int bit_off  = (px * 6) & 7;
 
       pixel = (tile_data[byte_idx] >> bit_off) & 0x3F;
       if (bit_off > 2)
@@ -4996,7 +4999,7 @@ void render_bg_m5_sf2(int line)
 }
 
 /*--------------------------------------------------------------------------*/
-/* 6 bpp sprite rendering                                                   */
+/* ПОЛНОЦЕННЫЙ 6 bpp sprite rendering (с hflip / vflip)                    */
 /*--------------------------------------------------------------------------*/
 void render_obj_m5_sf2(int line)
 {
@@ -5005,22 +5008,26 @@ void render_obj_m5_sf2(int line)
   uint16 *st = (uint16 *)&sat[0];
   uint8 *tile_data;
   uint16 attr;
-  uint8 atex, pixel;
+  uint8 atex, pixel, hflip, vflip, row;
 
   for (i = 0; i < max_sprite_pixels; i += 8)
   {
     attr = st[i >> 3];
     if ((attr & 0xFF00) == 0) continue;
 
-    tile_data = &vram[((attr & 0x07FF) << VRAM_TILE_SHIFT) + 
-                      (((line - (attr >> 8)) & 7) * 6)];
+    hflip = (attr >> 11) & 1;
+    vflip = (attr >> 12) & 1;
+    row = vflip ? (7 - ((line - (attr >> 8)) & 7)) : ((line - (attr >> 8)) & 7);
+
+    tile_data = &vram[((attr & 0x07FF) << 6) + (row * 6)];
 
     atex = ((attr >> 13) & 0xC0) | ((attr >> 15) & 0x01);
 
     for (x = 0; x < 8; x++)
     {
-      int byte_idx = (x * 6) >> 3;
-      int bit_off  = (x * 6) & 7;
+      int px = hflip ? (7 - x) : x;
+      int byte_idx = (px * 6) >> 3;
+      int bit_off  = (px * 6) & 7;
 
       pixel = (tile_data[byte_idx] >> bit_off) & 0x3F;
       if (bit_off > 2)
