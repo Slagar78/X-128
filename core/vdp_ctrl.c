@@ -355,7 +355,7 @@ void vdp_reset(void)
   }
 
   /* default rendering mode */
-  update_bg_pattern_cache = update_bg_pattern_cache_m5_sf2;
+  update_bg_pattern_cache = update_bg_pattern_cache_m4;
   if (system_hw < SYSTEM_MD)
   {
     /* Mode 0 */
@@ -1785,7 +1785,7 @@ static void vdp_reg_w(unsigned int r, unsigned int d, unsigned int cycles)
             }
 
             /* Mode 5 rendering */
-            update_bg_pattern_cache = update_bg_pattern_cache_m5_sf2;
+            update_bg_pattern_cache = update_bg_pattern_cache_m5_sf2;  /* было m5 */
             if (im2_flag)
             {
               parse_satb = parse_satb_m5_im2;
