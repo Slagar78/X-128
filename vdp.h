@@ -12,7 +12,7 @@
 #include "serialize.h"
 
 #define VDP_REGS 24
-#define CRAM_SIZE 64
+#define CRAM_SIZE 256
 #define SHADOW_OFFSET CRAM_SIZE
 #define HIGHLIGHT_OFFSET (SHADOW_OFFSET+CRAM_SIZE)
 #define MODE4_OFFSET (HIGHLIGHT_OFFSET+CRAM_SIZE)
@@ -192,6 +192,8 @@ typedef struct {
 	uint8_t        cd_latch;
 	uint8_t	       flags;
 	uint8_t        regs[VDP_REGS];
+	uint8_t        x128_regs[16];      // ← ТАБЛИЦА X-128 (0x20..0x2F)
+	uint8_t        custom_8bpp;        // ← флаг 8bpp-режима
 	//cycle count in MCLKs
 	uint32_t       cycles;
 	uint32_t       pending_vint_start;

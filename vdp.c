@@ -3764,27 +3764,23 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 		uint8_t mode_5 = context->regs[REG_MODE_2] & BIT_MODE_5;
 		context->address_latch = (context->address_latch & 0x1C000) | (value & 0x3FFF);
 		context->cd_latch = (context->cd_latch & 0x3C) | (value >> 14);
-		if ((value & 0xC000) == 0x8000) {
+				if ((value & 0xC000) == 0x8000) {
 			//Register write
-			uint8_t reg = (value >> 8) & 0x1F;
-			// The fact that this is needed seems to pour some cold water on my theory
-			// about how the address latch actually works. Needs more search to definitively confirm
-			context->address = (context->address & 0x1C000) | (value & 0x3FFF);
-			context->cd = (context->cd & 0x3C) | (value >> 14);
+			uint8_t reg = (value >> 8) & 0x3F;     // ← расширили до 0x3F
+			uint8_t data = value & 0xFF;
+
 			if (reg < (mode_5 ? VDP_REGS : 0xB)) {
-				//printf("register %d set to %X\n", reg, value & 0xFF);
+				// === СТАНДАРТНЫЕ РЕГИСТРЫ GENESIS ===
 				if (reg == REG_MODE_1 && (value & BIT_HVC_LATCH) && !(context->regs[reg] & BIT_HVC_LATCH)) {
 					vdp_latch_hv(context);
 				}
 				if (reg == REG_BG_COLOR) {
 					value &= 0x3F;
 				}
-				/*if (reg == REG_MODE_4 && ((value ^ context->regs[reg]) & BIT_H40)) {
-					printf("Mode changed from H%d to H%d @ %d, frame: %d\n", context->regs[reg] & BIT_H40 ? 40 : 32, value & BIT_H40 ? 40 : 32, context->cycles, context->frame);
-				}*/
-				uint8_t buffer[2] = {reg, value};
+				uint8_t buffer[2] = {reg, value & 0xFF};
 				event_log(EVENT_VDP_REG, context->cycles, sizeof(buffer), buffer);
-				context->regs[reg] = value;
+				context->regs[reg] = value & 0xFF;
+
 				if (reg == REG_MODE_4) {
 					context->double_res = (value & (BIT_INTERLACE | BIT_DOUBLE_RES)) == (BIT_INTERLACE | BIT_DOUBLE_RES);
 					if (!context->double_res) {
@@ -3794,11 +3790,20 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 				if (reg == REG_MODE_1 || reg == REG_MODE_2 || reg == REG_MODE_4) {
 					update_video_params(context);
 				}
-			} else if (reg == REG_KMOD_CTRL) {
-				if (!(value & 0xFF)) {
-					context->system->enter_debugger = 1;
+			}
+			else if (reg >= 0x20 && reg <= 0x2F) {
+				// === ТАБЛИЦА X-128 ===
+				uint8_t idx = reg - 0x20;
+				context->x128_regs[idx] = data;
+
+				if (idx == 0) {                    // регистр 0x20 — главный режим
+					context->custom_8bpp = data & 1;
 				}
-			} else if (reg == REG_KMOD_MSG) {
+			}
+			else if (reg == REG_KMOD_CTRL) {
+				if (!(value & 0xFF)) context->system->enter_debugger = 1;
+			}
+			else if (reg == REG_KMOD_MSG) {
 				char c = value;
 				if (c) {
 					context->kmod_buffer_length++;
@@ -3813,11 +3818,25 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 						init_terminal();
 						printf("KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
 					} else {
-						// GDB remote debugging is enabled, use stderr instead
 						fprintf(stderr, "KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
 					}
 					context->kmod_buffer_length = 0;
 				}
+			}
+			else if (reg == REG_KMOD_TIMER) {
+				if (!(value & 0x80)) {
+					if (is_stdout_enabled()) {
+						init_terminal();
+						printf("KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+					} else {
+						fprintf(stderr, "KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+					}
+				}
+				if (value & 0xC0) {
+					context->timer_start_cycle = context->cycles;
+				}
+			}
+		}
 			} else if (reg == REG_KMOD_TIMER) {
 				if (!(value & 0x80)) {
 					if (is_stdout_enabled()) {
