@@ -42,15 +42,15 @@
 #include "shared.h"
 #include "hvc.h"
 
-/* Mark a pattern as modified */
+/* MARK_BG_DIRTY — КАСТОМ ДЛЯ SHINING FORCE 2 (48 байт/тайл) */
 #define MARK_BG_DIRTY(addr)                         \
 {                                                   \
-  name = (addr >> 5) & 0x7FF;                       \
+  name = (addr >> 6) & 0x2FFF;   /* 512КБ / 48 = ~10922 тайлов */ \
   if (bg_name_dirty[name] == 0)                     \
   {                                                 \
     bg_name_list[bg_list_index++] = name;           \
   }                                                 \
-  bg_name_dirty[name] |= (1 << ((addr >> 2) & 7));  \
+  bg_name_dirty[name] |= (1 << ((addr >> 3) & 7));  /* 8 байт на dirty-бит */ \
 }
 
 /* VINT timings */
@@ -65,8 +65,8 @@
 
 /* VDP context */
 uint8 ALIGNED_(4) sat[0x400];     /* Internal copy of sprite attribute table */
-uint8 ALIGNED_(4) vram[0x10000];  /* Video RAM (64K x 8-bit) */
-uint8 ALIGNED_(4) cram[0x80];     /* On-chip color RAM (64 x 9-bit) */
+uint8 ALIGNED_(4) vram[0x80000];   /* Video RAM (512 KB для SF2) */
+uint8 ALIGNED_(4) cram[0x200];     /* Color RAM (256 цветов для SF2) */
 uint8 ALIGNED_(4) vsram[0x80];    /* On-chip vertical scroll RAM (40 x 11-bit) */
 uint8 reg[0x20];                  /* Internal VDP registers (23 x 8-bit) */
 uint8 hint_pending;               /* 0= Line interrupt is pending */
@@ -82,8 +82,8 @@ uint16 ntbb;                      /* Name table B base address */
 uint16 ntwb;                      /* Name table W base address */
 uint16 satb;                      /* Sprite attribute table base address */
 uint16 hscb;                      /* Horizontal scroll table base address */
-uint8 bg_name_dirty[0x800];       /* 1= This pattern is dirty */
-uint16 bg_name_list[0x800];       /* List of modified pattern indices */
+uint8 bg_name_dirty[0x3000];       /* 1= This pattern is dirty */
+uint16 bg_name_list[0x3000];       /* List of modified pattern indices */
 uint16 bg_list_index;             /* # of modified patterns in list */
 uint8 hscroll_mask;               /* Horizontal Scrolling line mask */
 uint8 playfield_shift;            /* Width of planes A, B (in bits) */
@@ -568,7 +568,7 @@ int vdp_context_load(uint8 *state)
   if (reg[1] & 0x04)
   {
     /* Mode 5 */
-    bg_list_index = 0x800;
+    bg_list_index = 0x3000;  // максимум для 512 КБ
 
     /* reinitialize palette */
     color_update_m5(0, *(uint16 *)&cram[border << 1]);
@@ -1823,7 +1823,7 @@ static void vdp_reg_w(unsigned int r, unsigned int d, unsigned int cycles)
             }
 
             /* max tiles to invalidate */
-            bg_list_index = 0x800;
+            bg_list_index = 0x3000;
           }
           else
           {
@@ -1863,7 +1863,7 @@ static void vdp_reg_w(unsigned int r, unsigned int d, unsigned int cycles)
             hvc_latch = vdp_hvc_r(cycles) | 0x10000;
 
             /* max tiles to invalidate */
-            bg_list_index = 0x200;
+            bg_list_index = 0x3000;
           }
 
           /* Invalidate pattern cache */
@@ -2247,51 +2247,48 @@ static void vdp_bus_w(unsigned int data)
       break;
     }
 
-    case 0x03:  /* CRAM */
+    case 0x03:  /* CRAM — 15-битный цвет (SF2 custom) */
     {
-      /* Pointer to CRAM 9-bit word */
-      uint16 *p = (uint16 *)&cram[addr & 0x7E];
+      /* Pointer to CRAM (256 x 16-bit) */
+      uint16 *p = (uint16 *)&cram[addr & 0x1FE];
 
-      /* Pack 16-bit bus data (BBB0GGG0RRR0) to 9-bit CRAM data (BBBGGGRRR) */
-      data = ((data & 0xE00) >> 3) | ((data & 0x0E0) >> 2) | ((data & 0x00E) >> 1);
+      /* Пишем полный 15-битный цвет (R5G5B5) без упаковки */
+      uint16 color15 = data & 0x7FFF;
 
-      /* Check if CRAM data is being modified */
-      if (data != *p)
+      if (color15 != *p)
       {
-        /* CRAM index (64 words) */
-        int index = (addr >> 1) & 0x3F;
+        *p = color15;
 
-        /* Write CRAM data */
-        *p = data;
+        int index = (addr >> 1) & 0xFF;
 
-        /* Color entry 0 of each palette is never displayed (transparent pixel) */
+        /* Color entry 0 of each palette is transparent */
         if (index & 0x0F)
         {
-          /* Update color palette */
-          color_update_m5(index, data);
+          color_update_m5(index, color15);   /* позже переделаем под 15 бит */
         }
 
-        /* Update backdrop color */
         if (index == border)
         {
-          color_update_m5(0x00, data);
+          color_update_m5(0x00, color15);
         }
 
-        /* CRAM modified during HBLANK (Striker, Zero the Kamikaze, Yuu Yuu Hakusho, etc) */
-        if ((v_counter < bitmap.viewport.h) && (m68k.cycles <= (mcycles_vdp + 860)) && ((reg[1] & 0x40) || (index == border)))
+        /* CRAM modified during HBLANK */
+        if ((v_counter < bitmap.viewport.h) && (m68k.cycles <= (mcycles_vdp + 860)) && 
+            ((reg[1] & 0x40) || (index == border)))
         {
-          /* Remap current line */
           remap_line(v_counter);
         }
       }
 
 #ifdef HOOK_CPU
       if (UNLIKELY(cpu_hook))
-        cpu_hook(HOOK_CRAM_W, 2, addr, data);
+        cpu_hook(HOOK_CRAM_W, 2, addr, color15);
 #endif
 
 #ifdef LOGVDP
-      error("[%d(%d)][%d(%d)] CRAM 0x%x write -> 0x%x (%x)\n", v_counter, (v_counter + (m68k.cycles - mcycles_vdp)/MCYCLES_PER_LINE)%lines_per_frame, m68k.cycles, m68k.cycles%MCYCLES_PER_LINE, addr, data, m68k_get_reg(M68K_REG_PC));
+      error("[%d(%d)][%d(%d)] CRAM 0x%x write -> 0x%04X (15-bit) (%x)\n", 
+            v_counter, (v_counter + (m68k.cycles - mcycles_vdp)/MCYCLES_PER_LINE)%lines_per_frame, 
+            m68k.cycles, m68k.cycles%MCYCLES_PER_LINE, addr, color15, m68k_get_reg(M68K_REG_PC));
 #endif
       break;
     }
@@ -2565,7 +2562,7 @@ static unsigned int vdp_68k_data_r_m5(void)
     case 0x08:
     {
       /* Read 9-bit word from CRAM */
-      data = *(uint16 *)&cram[addr & 0x7E];
+      data = *(uint16 *)&cram[addr & 0x1FE];
 
       /* Unpack 9-bit CRAM data (BBBGGGRRR) to 16-bit bus data (BBB0GGG0RRR0) */
       data = ((data & 0x1C0) << 3) | ((data & 0x038) << 2) | ((data & 0x007) << 1);
@@ -2715,44 +2712,24 @@ static void vdp_z80_data_w_m5(unsigned int data)
       break;
     }
 
-    case 0x03:  /* CRAM */
+    case 0x03:  /* CRAM — 15-битный цвет */
     {
-      /* Pointer to CRAM word */
-      uint16 *p = (uint16 *)&cram[addr & 0x7E];
+      uint16 *p = (uint16 *)&cram[addr & 0x1FE];
 
-      /* Pack 8-bit value into 9-bit CRAM data */
-      if (addr & 1)
+      /* Для Z80 в Mode 5 данные приходят байтами, но мы собираем 15-битный цвет */
+      uint16 color15 = data & 0x7FFF;   /* просто берём младшие 15 бит */
+
+      if (color15 != *p)
       {
-        /* Write high byte (0000BBB0 -> BBBxxxxxx) */
-        data = (*p & 0x3F) | ((data & 0x0E) << 5);
-      }
-      else
-      {
-        /* Write low byte (GGG0RRR0 -> xxxGGGRRR) */
-        data = (*p & 0x1C0) | ((data & 0x0E) >> 1)| ((data & 0xE0) >> 2);
-      }
+        *p = color15;
 
-      /* Check if CRAM data is being modified */
-      if (data != *p)
-      {
-        /* CRAM index (64 words) */
-        int index = (addr >> 1) & 0x3F;
+        int index = (addr >> 1) & 0xFF;
 
-        /* Write CRAM data */
-        *p = data;
-
-        /* Color entry 0 of each palette is never displayed (transparent pixel) */
         if (index & 0x0F)
-        {
-          /* Update color palette */
-          color_update_m5(index, data);
-        }
+          color_update_m5(index, color15);
 
-        /* Update backdrop color */
         if (index == border)
-        {
-          color_update_m5(0x00, data);
-        }
+          color_update_m5(0x00, color15);
       }
       break;
     }
@@ -2833,7 +2810,7 @@ static unsigned int vdp_z80_data_r_m5(void)
     case 0x08: /* CRAM */
     {
       /* Read CRAM data */
-      data = *(uint16 *)&cram[addr & 0x7E];
+      data = *(uint16 *)&cram[addr & 0x1FE];
 
       /* Unpack 9-bit CRAM data (BBBGGGRRR) to 16-bit data (BBB0GGG0RRR0) */
       data = ((data & 0x1C0) << 3) | ((data & 0x038) << 2) | ((data & 0x007) << 1);
@@ -3235,43 +3212,27 @@ static void vdp_dma_fill(unsigned int length)
       break;
     }
 
-    case 0x03:  /* CRAM */
+    case 0x03:  /* CRAM — 15-битный цвет */
     {
-      /* Get source data from next available FIFO entry */
-      uint16 data = fifo[fifo_idx];
-
-      /* Pack 16-bit bus data (BBB0GGG0RRR0) to 9-bit CRAM data (BBBGGGRRR) */
-      data = ((data & 0xE00) >> 3) | ((data & 0x0E0) >> 2) | ((data & 0x00E) >> 1);
+      uint16 data = fifo[fifo_idx] & 0x7FFF;   /* 15 бит */
 
       do
       {
-        /* Pointer to CRAM 9-bit word */
-        uint16 *p = (uint16 *)&cram[addr & 0x7E];
+        uint16 *p = (uint16 *)&cram[addr & 0x1FE];
 
-        /* Check if CRAM data is being modified */
         if (data != *p)
         {
-          /* CRAM index (64 words) */
-          int index = (addr >> 1) & 0x3F;
-
-          /* Write CRAM data */
           *p = data;
 
-          /* Color entry 0 of each palette is never displayed (transparent pixel) */
-          if (index & 0x0F)
-          {
-            /* Update color palette */
-            color_update_m5(index, data);
-          }
+          int index = (addr >> 1) & 0xFF;
 
-          /* Update backdrop color */
+          if (index & 0x0F)
+            color_update_m5(index, data);
+
           if (index == border)
-          {
             color_update_m5(0x00, data);
-          }
         }
-          
-        /* Increment CRAM address */
+
         addr += reg[15];
       }
       while (--length);

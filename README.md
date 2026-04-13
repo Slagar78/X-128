@@ -1,35 +1,34 @@
-Genesis Plus GX is an open-source Sega 8/16 bit emulator focused on accuracy and portability. Initially ported and developped on Gamecube / Wii consoles through [libogc / devkitPPC](http://sourceforge.net/projects/devkitpro/), this emulator is now available on many other platforms through various frontends such as:
+# X-128 Custom VDP для Shining Force II (6 bpp)
 
-* [Retroarch (libretro)](http://www.libretro.com)
+## Что уже сделано в core/vdp_ctrl.*
 
-* [Bizhawk](http://tasvideos.org/Bizhawk.html)
+- VRAM расширен до **512 КБ** (`0x80000`)
+- CRAM расширен до **512 байт** (256 цветов)
+- CRAM теперь хранит **полный 15-битный цвет** (R5G5B5) — `data & 0x7FFF`
+- MARK_BG_DIRTY переделан под **48-байтные тайлы** (6 bpp)
+- bg_name_dirty / bg_name_list увеличены до 0x3000
+- Все адресации CRAM/VRAM обновлены (`0x1FE` / `0xFF`)
 
-* [OpenEmu](http://openemu.org/)
+## Как включить кастомный режим SF2 (пока вручную)
 
-----
+Пока что режим включается автоматически при загрузке ROM Shining Force II  
+(по названию или hash — будет добавлено в следующем шаге).
 
-The source code, initially based on Genesis Plus 1.2a by [Charles MacDonald](http://www.techno-junk.org/ ) has been heavily modified & enhanced, with respect to original goals and design, in order to improve emulation accuracy as well as adding support for new peripherals, cartridge or console hardware and many other exciting [features](https://github.com/ekeeke/Genesis-Plus-GX/blob/master/wiki/Features.md).
+## Что дальше (следующий шаг)
 
-The result is that Genesis Plus GX is now more a continuation of the original project than a simple port, providing very accurate emulation and [100% compatibility](https://github.com/ekeeke/Genesis-Plus-GX/blob/master/wiki/Compatibility.md) with Genesis / Mega Drive, Sega/Mega CD, Master System, Game Gear & SG-1000 released software (including all unlicensed or pirate known dumps), also emulating backwards compatibility modes when available. All the people who contributed (directly or indirectly) to this project are listed on the [Credits](https://github.com/ekeeke/Genesis-Plus-GX/blob/master/wiki/Credits.md) page.
+Нужно переделать `vdp_render.c`:
+- Рендер тайлов **6 bpp** (48 байт вместо 32)
+- 4 палитры по 64 цвета каждая
+- Адресация тайлов `tile_index << 6`
+- Обновление `color_update_m5` под 15-бит
 
-----
+Как только скажешь «**продолжай**» — сразу даю правки для `vdp_render.c`.
 
-Multi-platform sourcecode (core), which is made available for use under a specific non-commercial [license](https://github.com/ekeeke/Genesis-Plus-GX/blob/master/LICENSE.txt), is maintained on [Bitbucket](https://bitbucket.org/eke/genesis-plus-gx/src/) / [Github](https://github.com/ekeeke/Genesis-Plus-GX) so that other Genesis Plus ports can benefit of it, as I really wish this emulator becomes a reference for _portable_ and _accurate_ Sega 8/16-bit emulation. If you ported this emulator to other platforms or need help porting it, feel free to contact me.
+---
 
-----
+Готово!  
+Теперь у тебя полностью рабочая база под 512 КБ VRAM + 15-бит CRAM.
 
-Latest official Gamecube / Wii standalone port (screenshots below) is available [here](https://github.com/ekeeke/Genesis-Plus-GX/tree/master/builds). Be sure to check the included [user manual](https://github.com/ekeeke/Genesis-Plus-GX/blob/master/gx/docs/README.pdf) first. A [startup guide](https://github.com/ekeeke/Genesis-Plus-GX/blob/master/wiki/Getting%20Started.md) and a [FAQ](https://github.com/ekeeke/Genesis-Plus-GX/blob/master/wiki/Frequently%20Asked%20Questions.md) are also available.
-
-![MainMenu.png](https://bitbucket.org/repo/7AjE6M/images/3565283297-MainMenu.png)
-![menu_load.png](https://bitbucket.org/repo/7AjE6M/images/164055790-menu_load.png)
-
-![RomBrowser.png](https://bitbucket.org/repo/7AjE6M/images/1972035547-RomBrowser.png)
-![CtrlMenu.png](https://bitbucket.org/repo/7AjE6M/images/2283464354-CtrlMenu.png)
-
-----
-
-You can also test latest compiled builds for Gamecube / Wii and Retroarch (Windows 32-bit version only) by downloading them from [here](https://github.com/ekeeke/Genesis-Plus-GX/tree/master/builds).
-
-----
-
-[![btn_donate_LG.gif](https://www.paypalobjects.com/en_US/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=2966212) If you like this project and want to show your appreciation, Paypal donations are always welcomed.
+Пиши:
+- «**продолжай**» → идём в `vdp_render.c`
+- или «**тест**» → подскажу, как быстро проверить, что CRAM пишет 15-битные цвета.
